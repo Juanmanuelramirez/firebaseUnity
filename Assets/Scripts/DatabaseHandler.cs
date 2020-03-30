@@ -51,15 +51,10 @@ namespace Firebase.Sample.Database
         const int kMaxLogSize = 16382;
         DependencyStatus dependencyStatus = DependencyStatus.UnavailableOther;
         protected bool isFirebaseInitialized = false;
-
-        protected Firebase.Auth.FirebaseAuth auth;
-
+        
         protected string displayName = "";
 
-        private bool fetchingToken = false;
-
         private string UserID = "";
-        private Firebase.Auth.FirebaseUser currentUser;
 
         // When the app starts, check to make sure that we have
         // the required dependencies to use Firebase, and if not,
@@ -91,7 +86,6 @@ namespace Firebase.Sample.Database
                 dependencyStatus = task.Result;
                 if (dependencyStatus == Firebase.DependencyStatus.Available)
                 {
-                    InitializeAuth();
                     FirebaseApp app = FirebaseApp.DefaultInstance;
                     //app.SetEditorDatabaseUrl("https://login-df35a.firebaseio.com/");
                     StartListener();
@@ -105,54 +99,11 @@ namespace Firebase.Sample.Database
       
         }
 
-        protected void InitializeAuth()
-        {
-            DebugLog("Setting up Firebase Auth");
-            auth = Firebase.Auth.FirebaseAuth.DefaultInstance;
-            auth.StateChanged += AuthStateChanged;
-            auth.IdTokenChanged += IdTokenChanged;
-            // Specify valid options to construct a secondary authentication object.
-
-            AuthStateChanged(this, null);
-        }
-        void AuthStateChanged(object sender, System.EventArgs eventArgs)
-        {
-            Firebase.Auth.FirebaseAuth senderAuth = sender as Firebase.Auth.FirebaseAuth;
-            Firebase.Auth.FirebaseUser user = null;
-            if (senderAuth != null) userByAuth.TryGetValue(senderAuth.App.Name, out user);
-            if (senderAuth == auth && senderAuth.CurrentUser != user)
-            {
-                bool signedIn = user != senderAuth.CurrentUser && senderAuth.CurrentUser != null;
-                if (!signedIn && user != null)
-                {
-                    DebugLog("Signed out " + user.UserId);
-                    
-                }
-                user = senderAuth.CurrentUser;
-                userByAuth[senderAuth.App.Name] = user;
-                if (signedIn)
-                {
-                    DebugLog("AuthStateChanged Signed in " + user.UserId);
-                    displayName = user.DisplayName ?? "";
-                    currentUser = user;
-                    //DisplayDetailedUserInfo(user, 1);
-                }
-            }
-        }
-        void IdTokenChanged(object sender, System.EventArgs eventArgs)
-        {
-            Firebase.Auth.FirebaseAuth senderAuth = sender as Firebase.Auth.FirebaseAuth;
-            if (senderAuth == auth && senderAuth.CurrentUser != null && !fetchingToken)
-            {
-                senderAuth.CurrentUser.TokenAsync(false).ContinueWithOnMainThread(
-                  task => DebugLog(String.Format("Token[0:8] = {0}", task.Result.Substring(0, 8))));
-            }
-        }
         protected void StartListener()
         {
             FirebaseDatabase.DefaultInstance
                //.GetReference("Leaders").OrderByChild("score")
-              .GetReference(currentUser.UserId).Child("Leaders").OrderByValue()
+              .GetReference(Session.user.UserId).Child("Leaders").OrderByValue()
               .ValueChanged += (object sender2, ValueChangedEventArgs e2) => {
                   if (e2.DatabaseError != null)
                   {
@@ -279,8 +230,7 @@ namespace Firebase.Sample.Database
             DebugLog(String.Format("Attempting to add score {0} {1}",
               email, score.ToString()));
 
-            UserID = currentUser.UserId;
-            Debug.LogError(currentUser);
+            UserID = Session.user.UserId;
 
             DatabaseReference reference = FirebaseDatabase.DefaultInstance.GetReference(UserID).Child("Leaders");//GetReference(UserID).Child("Leaders");
 

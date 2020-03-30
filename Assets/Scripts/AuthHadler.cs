@@ -242,6 +242,9 @@ namespace Firebase.Sample.Auth
                     DebugLog("AuthStateChanged Signed in " + user.UserId);
                     displayName = user.DisplayName ?? "";
                     DisplayDetailedUserInfo(user, 1);
+
+                    Session.SetUser(user);
+                    Session.SetAuth(auth);
                 }
             }
         }
