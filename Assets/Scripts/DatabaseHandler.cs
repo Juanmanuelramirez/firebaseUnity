@@ -103,7 +103,7 @@ namespace Firebase.Sample.Database
         {
             FirebaseDatabase.DefaultInstance
                //.GetReference("Leaders").OrderByChild("score")
-              .GetReference(Session.user.UserId).Child("Leaders").OrderByValue()
+              .GetReference(Session.GetUser().UserId).Child("Leaders").OrderByValue()
               .ValueChanged += (object sender2, ValueChangedEventArgs e2) => {
                   if (e2.DatabaseError != null)
                   {
@@ -230,7 +230,7 @@ namespace Firebase.Sample.Database
             DebugLog(String.Format("Attempting to add score {0} {1}",
               email, score.ToString()));
 
-            UserID = Session.user.UserId;
+            UserID = Session.GetUser().UserId;
 
             DatabaseReference reference = FirebaseDatabase.DefaultInstance.GetReference(UserID).Child("Leaders");//GetReference(UserID).Child("Leaders");
 

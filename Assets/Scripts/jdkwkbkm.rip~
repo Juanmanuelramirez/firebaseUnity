@@ -28,16 +28,11 @@ namespace Firebase.Sample.Auth
     // necessary setup (initializing the firebase app, etc) on
     // startup.
     using System.Collections;
+    using System.Collections.Generic;
     using UnityEngine;
-    using UnityEngine.UI;
-    using UnityEngine.SceneManagement;
 
     public class AuthHadler : MonoBehaviour
     {
-
-        public Text emailText;
-        public Text passwordText;
-
         protected Firebase.Auth.FirebaseAuth auth;
         protected Dictionary<string, Firebase.Auth.FirebaseUser> userByAuth =
           new Dictionary<string, Firebase.Auth.FirebaseUser>();
@@ -241,9 +236,6 @@ namespace Firebase.Sample.Auth
                     DebugLog("AuthStateChanged Signed in " + user.UserId);
                     displayName = user.DisplayName ?? "";
                     DisplayDetailedUserInfo(user, 1);
-
-                    Session.SetUser(user);
-                    Session.SetAuth(auth);
                 }
             }
         }
@@ -294,9 +286,6 @@ namespace Firebase.Sample.Auth
         // Create a user with the email and password.
         public void CreateUserWithEmailAsync()
         {
-            email = emailText.text;
-            password = passwordText.text; 
-
             DebugLog(String.Format("Attempting to create user {0}...", email));
             DisableUI();
 
@@ -342,11 +331,8 @@ namespace Firebase.Sample.Auth
         }
 
         // Sign-in with an email and password.
-        public Task SigninWithEmailAsync()
+        public void SigninWithEmailAsync()
         {
-            email = emailText.text;
-            password = passwordText.text;
-
             DebugLog(String.Format("Attempting to sign in as {0}...", email));
             DisableUI();
             if (signInAndFetchProfile)
@@ -365,24 +351,31 @@ namespace Firebase.Sample.Auth
         // This is functionally equivalent to the Signin() function.  However, it
         // illustrates the use of Credentials, which can be aquired from many
         // different sources of authentication.
-        public void SigninWithEmailCredentialAsync()
+        public Task SigninWithEmailCredentialAsync()
         {
             DebugLog(String.Format("Attempting to sign in as {0}...", email));
             DisableUI();
             if (signInAndFetchProfile)
             {
-                auth.SignInAndRetrieveDataWithCredentialAsync(
+                return auth.SignInAndRetrieveDataWithCredentialAsync(
                   Firebase.Auth.EmailAuthProvider.GetCredential(email, password)).ContinueWithOnMainThread(
                     HandleSignInWithSignInResult);
             }
             else
             {
-                auth.SignInWithCredentialAsync(
+                return auth.SignInWithCredentialAsync(
                   Firebase.Auth.EmailAuthProvider.GetCredential(email, password)).ContinueWithOnMainThread(
                     HandleSignInWithUser);
             }
         }
 
+        // Attempt to sign in anonymously.
+        public Task SigninAnonymouslyAsync()
+        {
+            DebugLog("Attempting to sign anonymously...");
+            DisableUI();
+            return auth.SignInAnonymouslyAsync().ContinueWithOnMainThread(HandleSignInWithUser);
+        }
 
         public void AuthenticateToGameCenter()
         {
@@ -422,8 +415,6 @@ namespace Firebase.Sample.Auth
             {
                 DebugLog(String.Format("{0} signed in", task.Result.DisplayName));
             }
-            //Cargamos la scena 01
-            SceneManager.LoadSceneAsync("Scene_01");
         }
 
         // Called when a sign-in with profile data completes.
@@ -433,6 +424,42 @@ namespace Firebase.Sample.Auth
             if (LogTaskCompletion(task, "Sign-in"))
             {
                 DisplaySignInResult(task.Result, 1);
+            }
+        }
+
+        // Link the current user with an email / password credential.
+        protected Task LinkWithEmailCredentialAsync()
+        {
+            if (auth.CurrentUser == null)
+            {
+                DebugLog("Not signed in, unable to link credential to user.");
+                var tcs = new TaskCompletionSource<bool>();
+                tcs.SetException(new Exception("Not signed in"));
+                return tcs.Task;
+            }
+            DebugLog("Attempting to link credential to user...");
+            Firebase.Auth.Credential cred =
+              Firebase.Auth.EmailAuthProvider.GetCredential(email, password);
+            if (signInAndFetchProfile)
+            {
+                return
+                  auth.CurrentUser.LinkAndRetrieveDataWithCredentialAsync(cred).ContinueWithOnMainThread(
+                    task => {
+                        if (LogTaskCompletion(task, "Link Credential"))
+                        {
+                            DisplaySignInResult(task.Result, 1);
+                        }
+                    }
+                  );
+            }
+            else
+            {
+                return auth.CurrentUser.LinkWithCredentialAsync(cred).ContinueWithOnMainThread(task => {
+                    if (LogTaskCompletion(task, "Link Credential"))
+                    {
+                        DisplayDetailedUserInfo(task.Result, 1);
+                    }
+                });
             }
         }
 
@@ -707,6 +734,362 @@ namespace Firebase.Sample.Auth
             else
             {
                 DebugLog("Sign-in before unlinking user.");
+            }
+        }
+
+        // Begin authentication with the phone number.
+        protected void VerifyPhoneNumber()
+        {
+            var phoneAuthProvider = Firebase.Auth.PhoneAuthProvider.GetInstance(auth);
+            phoneAuthProvider.VerifyPhoneNumber(phoneNumber, phoneAuthTimeoutMs, null,
+              verificationCompleted: (cred) => {
+                  DebugLog("Phone Auth, auto-verification completed");
+                  if (signInAndFetchProfile)
+                  {
+                      auth.SignInAndRetrieveDataWithCredentialAsync(cred).ContinueWithOnMainThread(
+                  HandleSignInWithSignInResult);
+                  }
+                  else
+                  {
+                      auth.SignInWithCredentialAsync(cred).ContinueWithOnMainThread(HandleSignInWithUser);
+                  }
+              },
+              verificationFailed: (error) => {
+                  DebugLog("Phone Auth, verification failed: " + error);
+              },
+              codeSent: (id, token) => {
+                  phoneAuthVerificationId = id;
+                  DebugLog("Phone Auth, code sent");
+              },
+              codeAutoRetrievalTimeOut: (id) => {
+                  DebugLog("Phone Auth, auto-verification timed out");
+              });
+        }
+
+        // Sign in using phone number authentication using code input by the user.
+        protected void VerifyReceivedPhoneCode()
+        {
+            var phoneAuthProvider = Firebase.Auth.PhoneAuthProvider.GetInstance(auth);
+            // receivedCode should have been input by the user.
+            var cred = phoneAuthProvider.GetCredential(phoneAuthVerificationId, receivedCode);
+            if (signInAndFetchProfile)
+            {
+                auth.SignInAndRetrieveDataWithCredentialAsync(cred).ContinueWithOnMainThread(
+                  HandleSignInWithSignInResult);
+            }
+            else
+            {
+                auth.SignInWithCredentialAsync(cred).ContinueWithOnMainThread(HandleSignInWithUser);
+            }
+        }
+
+        // Determines whether another authentication object is available to focus.
+        protected bool HasOtherAuth { get { return auth != otherAuth && otherAuth != null; } }
+
+        // Swap the authentication object currently being controlled by the application.
+        protected void SwapAuthFocus()
+        {
+            if (!HasOtherAuth) return;
+            var swapAuth = otherAuth;
+            otherAuth = auth;
+            auth = swapAuth;
+            DebugLog(String.Format("Changed auth from {0} to {1}",
+                                    otherAuth.App.Name, auth.App.Name));
+        }
+
+        void GUIDisplayGameCenterControls()
+        {
+            bool isOnIosDevice = Application.platform == RuntimePlatform.IPhonePlayer;
+            bool isOnOSXDesktop = (Application.platform == RuntimePlatform.OSXEditor ||
+                                    Application.platform == RuntimePlatform.OSXPlayer);
+
+            if (isOnIosDevice || isOnOSXDesktop)
+            {
+                if (GUILayout.Button(new GUIContent("Authenticate To Game Center")))
+                {
+                    AuthenticateToGameCenter();
+                }
+
+                bool gameCenterEnabled = (isOnIosDevice ?
+                                            Firebase.Auth.GameCenterAuthProvider.IsPlayerAuthenticated() :
+                                            false);
+                using (new ScopedGuiEnabledModifier(gameCenterEnabled))
+                {
+                    string tooltip = "";
+                    if (!gameCenterEnabled)
+                    {
+                        tooltip = "No Game Center player authenticated.";
+                    }
+                    if (GUILayout.Button(new GUIContent("Sign In With Game Center", tooltip)))
+                    {
+                        SignInWithGameCenterAsync();
+                    }
+                }
+            }
+        }
+
+        // Render the log output in a scroll view.
+        void GUIDisplayLog()
+        {
+            scrollViewVector = GUILayout.BeginScrollView(scrollViewVector);
+            GUILayout.Label(logText);
+            GUILayout.EndScrollView();
+        }
+
+        // Render the buttons and other controls.
+        void GUIDisplayControls()
+        {
+            if (UIEnabled)
+            {
+                controlsScrollViewVector =
+                  GUILayout.BeginScrollView(controlsScrollViewVector);
+                GUILayout.BeginVertical();
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Email:", GUILayout.Width(Screen.width * 0.20f));
+                email = GUILayout.TextField(email);
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Password:", GUILayout.Width(Screen.width * 0.20f));
+                password = usePasswordInput ? GUILayout.PasswordField(password, '*') :
+                  GUILayout.TextField(password);
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Display Name:", GUILayout.Width(Screen.width * 0.20f));
+                displayName = GUILayout.TextField(displayName);
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Phone Number:", GUILayout.Width(Screen.width * 0.20f));
+                phoneNumber = GUILayout.TextField(phoneNumber);
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Phone Auth Received Code:", GUILayout.Width(Screen.width * 0.20f));
+                receivedCode = GUILayout.TextField(receivedCode);
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+
+                if (GUILayout.Button("Create User"))
+                {
+                    CreateUserWithEmailAsync();
+                }
+                if (GUILayout.Button("Sign In Anonymously"))
+                {
+                    SigninAnonymouslyAsync();
+                }
+                if (GUILayout.Button("Sign In With Email"))
+                {
+                    SigninWithEmailAsync();
+                }
+                if (GUILayout.Button("Sign In With Email Credential"))
+                {
+                    SigninWithEmailCredentialAsync();
+                }
+                if (GUILayout.Button("Link With Email Credential"))
+                {
+                    LinkWithEmailCredentialAsync();
+                }
+                if (GUILayout.Button("Reauthenticate with Email"))
+                {
+                    ReauthenticateAsync();
+                }
+                GUIDisplayGameCenterControls();
+                if (GUILayout.Button("Reload User"))
+                {
+                    ReloadUser();
+                }
+                if (GUILayout.Button("Get User Token"))
+                {
+                    GetUserToken();
+                }
+                if (GUILayout.Button("Get User Info"))
+                {
+                    GetUserInfo();
+                }
+                if (GUILayout.Button("Unlink Email Credential"))
+                {
+                    UnlinkEmailAsync();
+                }
+                if (GUILayout.Button("Sign Out"))
+                {
+                    SignOut();
+                }
+                if (GUILayout.Button("Delete User"))
+                {
+                    DeleteUserAsync();
+                }
+                if (GUILayout.Button("Show Providers For Email"))
+                {
+                    DisplayProvidersForEmail();
+                }
+                if (GUILayout.Button("Password Reset Email"))
+                {
+                    SendPasswordResetEmail();
+                }
+                if (GUILayout.Button("Authenticate Phone Number"))
+                {
+                    VerifyPhoneNumber();
+                }
+                if (GUILayout.Button("Verify Received Phone Code"))
+                {
+                    VerifyReceivedPhoneCode();
+                }
+                if (GUILayout.Button(String.Format("Fetch Profile on Sign-in {0}",
+                                                    signInAndFetchProfile ?
+                                                      "Enabled" : "Disabled")))
+                {
+                    signInAndFetchProfile = !signInAndFetchProfile;
+                }
+                if (HasOtherAuth && GUILayout.Button(String.Format("Switch to auth object {0}",
+                                                                    otherAuth.App.Name)))
+                {
+                    SwapAuthFocus();
+                }
+
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Phone-Only OAuth2:", GUILayout.Width(Screen.width * 0.4f));
+                GUILayout.EndHorizontal();
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("scope 1:", GUILayout.Width(Screen.width * 0.20f));
+                scope1 = GUILayout.TextField(scope1, GUILayout.Width(Screen.width * 0.5f));
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("scope 2:", GUILayout.Width(Screen.width * 0.20f));
+                scope2 = GUILayout.TextField(scope2, GUILayout.Width(Screen.width * 0.5f));
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("customParam Key1:", GUILayout.Width(Screen.width * 0.20f));
+                customParameterKey1 = GUILayout.TextField(customParameterKey1, GUILayout.Width(Screen.width * 0.5f));
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("customParam Value1:", GUILayout.Width(Screen.width * 0.20f));
+                customParameterValue1 = GUILayout.TextField(customParameterValue1, GUILayout.Width(Screen.width * 0.25f));
+                GUILayout.EndHorizontal();
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("customParam Key2:", GUILayout.Width(Screen.width * 0.20f));
+                customParameterKey2 = GUILayout.TextField(customParameterKey2, GUILayout.Width(Screen.width * 0.5f));
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("customParam Value2:", GUILayout.Width(Screen.width * 0.20f));
+                customParameterValue2 = GUILayout.TextField(customParameterValue2, GUILayout.Width(Screen.width * 0.5f));
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(20);
+                if (GUILayout.Button("SignInWith | Microsoft"))
+                {
+                    SignInWithProvider(Firebase.Auth.MicrosoftAuthProvider.ProviderId);
+                }
+                if (GUILayout.Button("SignInWith | Yahoo"))
+                {
+                    SignInWithProvider(Firebase.Auth.YahooAuthProvider.ProviderId);
+                }
+                if (GUILayout.Button("ReauthWith | Microsoft"))
+                {
+                    ReauthenticateWithProvider(Firebase.Auth.MicrosoftAuthProvider.ProviderId);
+                }
+                if (GUILayout.Button("ReauthWith | Yahoo"))
+                {
+                    ReauthenticateWithProvider(Firebase.Auth.YahooAuthProvider.ProviderId);
+                }
+                if (GUILayout.Button("LinkWith | Microsoft"))
+                {
+                    LinkWithProvider(Firebase.Auth.MicrosoftAuthProvider.ProviderId);
+                }
+                if (GUILayout.Button("LinkWith | Yahoo"))
+                {
+                    LinkWithProvider(Firebase.Auth.YahooAuthProvider.ProviderId);
+                }
+                if (GUILayout.Button("Unlink User | Microsoft"))
+                {
+                    UnlinkUser(Firebase.Auth.MicrosoftAuthProvider.ProviderId);
+                }
+                if (GUILayout.Button("Unlink User | Yahoo"))
+                {
+                    UnlinkUser(Firebase.Auth.YahooAuthProvider.ProviderId);
+                }
+
+                GUIDisplayCustomControls();
+                GUILayout.EndVertical();
+                GUILayout.EndScrollView();
+            }
+        }
+
+        // Overridable function to allow additional controls to be added.
+        protected virtual void GUIDisplayCustomControls() { }
+
+        // Render the GUI:
+        void OnGUI()
+        {
+            GUI.skin = fb_GUISkin;
+            if (dependencyStatus != Firebase.DependencyStatus.Available)
+            {
+                GUILayout.Label("One or more Firebase dependencies are not present.");
+                GUILayout.Label("Current dependency status: " + dependencyStatus.ToString());
+                return;
+            }
+            Rect logArea, controlArea;
+
+            if (Screen.width < Screen.height)
+            {
+                // Portrait mode
+                controlArea = new Rect(0.0f, 0.0f, Screen.width, Screen.height * 0.5f);
+                logArea = new Rect(0.0f, Screen.height * 0.5f, Screen.width, Screen.height * 0.5f);
+            }
+            else
+            {
+                // Landscape mode
+                controlArea = new Rect(0.0f, 0.0f, Screen.width * 0.5f, Screen.height);
+                logArea = new Rect(Screen.width * 0.5f, 0.0f, Screen.width * 0.5f, Screen.height);
+            }
+
+            GUILayout.BeginArea(logArea);
+            GUIDisplayLog();
+            GUILayout.EndArea();
+
+            GUILayout.BeginArea(controlArea);
+            GUIDisplayControls();
+            GUILayout.EndArea();
+        }
+
+        private class ScopedGuiEnabledModifier : IDisposable
+        {
+            private bool wasEnabled;
+            public ScopedGuiEnabledModifier(bool newValue)
+            {
+                wasEnabled = GUI.enabled;
+                GUI.enabled = newValue;
+            }
+
+            public void Dispose()
+            {
+                GUI.enabled = wasEnabled;
             }
         }
     }

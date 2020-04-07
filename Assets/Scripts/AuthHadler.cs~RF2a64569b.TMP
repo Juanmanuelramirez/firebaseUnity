@@ -28,6 +28,7 @@ namespace Firebase.Sample.Auth
     // necessary setup (initializing the firebase app, etc) on
     // startup.
     using System.Collections;
+    using System.Collections.Generic;
     using UnityEngine;
     using UnityEngine.UI;
     using UnityEngine.SceneManagement;
@@ -241,9 +242,6 @@ namespace Firebase.Sample.Auth
                     DebugLog("AuthStateChanged Signed in " + user.UserId);
                     displayName = user.DisplayName ?? "";
                     DisplayDetailedUserInfo(user, 1);
-
-                    Session.SetUser(user);
-                    Session.SetAuth(auth);
                 }
             }
         }

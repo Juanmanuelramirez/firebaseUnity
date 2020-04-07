@@ -3,8 +3,8 @@
 public static class Session
 {
 
-    public static FirebaseUser user;
-    public static FirebaseAuth loginAuth;
+    private static FirebaseUser user;
+    private static FirebaseAuth loginAuth;
 
     public static void SetUser(FirebaseUser currentUser)
     {
